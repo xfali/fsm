@@ -5,12 +5,16 @@
 
 package fsm
 
-import "log"
+import (
+	"log"
+	"sync"
+)
 
 type SimpleFSM struct {
 	stateMap map[State]map[Event]Action
-
 	curState interface{}
+
+	lock sync.Mutex
 }
 
 func NewSimpleFSM() *SimpleFSM {
@@ -22,10 +26,15 @@ func NewSimpleFSM() *SimpleFSM {
 }
 
 func (f *SimpleFSM) Initial(state State) {
+	f.lock.Lock()
 	f.curState = state
+	f.lock.Unlock()
 }
 
 func (f *SimpleFSM) Current() *State {
+	f.lock.Lock()
+	defer f.lock.Unlock()
+
 	return &f.curState
 }
 
@@ -38,6 +47,9 @@ func (f *SimpleFSM) Close() error {
 }
 
 func (f *SimpleFSM) AddState(state State, event Event, action Action) error {
+	f.lock.Lock()
+	defer f.lock.Unlock()
+
 	if evs, ok := f.stateMap[state]; ok {
 		evs[event] = action
 	} else {
@@ -49,9 +61,14 @@ func (f *SimpleFSM) AddState(state State, event Event, action Action) error {
 }
 
 func (f *SimpleFSM) Execute(event Event, param interface{}) error {
+	f.lock.Lock()
+	defer f.lock.Unlock()
+
 	if evs, ok := f.stateMap[f.curState]; ok {
 		if action, ok := evs[event]; ok {
+			f.lock.Unlock()
 			nextState, err := action(param)
+			f.lock.Lock()
 			f.curState = nextState
 			return err
 		} else {
