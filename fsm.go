@@ -11,15 +11,43 @@ type State = interface{}
 type Event = interface{}
 type Action func(interface{}) (State, error)
 
+type Listener interface {
+	StateChanged(from, to State)
+
+	StateEntered(state State)
+
+	StateExited(state State)
+
+	EventNotAccepted(event Event)
+
+	Transition(action Action)
+
+	TransitionStarted(action Action)
+
+	TransitionEnded(action Action)
+
+	FSMStarted(fsm FSM)
+
+	FSMStopped(fsm FSM)
+
+	FSMError(fsm FSM, err error)
+}
+
 var NoTransitionError = errors.New("No Transition ")
 
 type FSM interface {
 	Start() error
+
 	Close() error
 
+	SetListener(listener Listener)
+
 	Initial(state State)
+
 	Current() *State
+
 	AddState(state State, event Event, action Action) error
+
 	SendEvent(event Event, param interface{}) error
 }
 
