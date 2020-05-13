@@ -106,15 +106,21 @@ func (f *SimpleFSM) Execute(event Event, param interface{}) error {
 
 	if evs, ok := f.stateMap[f.curState]; ok {
 		if action, ok := evs[event]; ok {
-			f.lock.Unlock()
-			f.listener.TransitionStarted(action)
-			nextState, err := action(param)
-			f.listener.TransitionEnded(action)
-			if err != nil {
-				f.listener.FSMError(f, err)
-			}
+			//为了减小锁粒度，在执行action时解锁，由于DefaultFSM用chan处理event保证了互斥
+			nextState, err := func() (State, error) {
+				f.lock.Unlock()
+				defer f.lock.Lock()
+
+				f.listener.TransitionStarted(action)
+				next, err := action(param)
+				f.listener.TransitionEnded(action)
+				if err != nil {
+					f.listener.FSMError(f, err)
+				}
+				return next, err
+			}()
+
 			f.listener.StateEntered(nextState)
-			f.lock.Lock()
 			origin := f.curState
 			f.curState = nextState
 			f.listener.StateExited(origin)
