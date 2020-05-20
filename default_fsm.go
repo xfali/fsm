@@ -47,8 +47,8 @@ func New(opts ...Opt) *DefaultFSM {
 	ret.eventChan = make(chan eventEntity, ret.eventChanSize)
 	if ret.msgChanSize > 0 {
 		ret.msgChan = make(chan Message, ret.msgChanSize)
+		ret.sender = ret
 	}
-	ret.sender = ret
 
 	return ret
 }

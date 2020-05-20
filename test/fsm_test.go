@@ -27,6 +27,7 @@ const (
 
 func NewFSM(t *testing.T) fsm.FSM {
 	m := fsm.New()
+	//m := fsm.New(fsm.SetMessageBufferSize(0))
 	m.AddState(state_a, event_b, func(i interface{}) (state fsm.State, e error) {
 		t.Log("a -> 2")
 		return state_b, nil

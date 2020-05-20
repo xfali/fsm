@@ -5,7 +5,9 @@
 
 package fsm
 
-import "sync"
+import (
+	"sync"
+)
 
 type SimpleFSM struct {
 	stateMap  map[State]map[Event]Action
