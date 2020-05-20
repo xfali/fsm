@@ -8,137 +8,12 @@ package fsm
 import (
 	"fmt"
 	"os"
-	"sync"
 )
-
-type fsmEvent interface {
-	Type() int
-}
 
 const (
-	UnknownEvent = iota
-	stateChangedEvent
-	stateEnteredEvent
-	stateExitedEvent
-	eventNotAcceptedEvent
-	transitionEvent
-	transitionStartedEvent
-	transitionEndedEvent
-	fsmStartedEvent
-	fsmStoppedEvent
-	fsmErrorEvent
-
-	CustomerEvent = 10000
+	DefaultEventBufferSize   = 1024
+	DefaultMessageBufferSize = 1024
 )
-
-type SimpleFSM struct {
-	stateMap map[State]map[Event]Action
-	curState interface{}
-	listener Listener
-
-	lock sync.Mutex
-}
-
-func NewSimpleFSM() *SimpleFSM {
-	ret := &SimpleFSM{
-		stateMap: map[interface{}]map[interface{}]Action{},
-		curState: nil,
-		listener: &DefaultListener{},
-	}
-	return ret
-}
-
-func (f *SimpleFSM) HandlerFsmEvent(e fsmEvent) {
-	switch e.(type) {
-
-	}
-}
-
-func (f *SimpleFSM) SetListener(listener Listener) {
-	f.lock.Lock()
-	defer f.lock.Unlock()
-
-	f.listener = listener
-}
-
-func (f *SimpleFSM) Initial(state State) {
-	f.lock.Lock()
-	defer f.lock.Unlock()
-
-	f.curState = state
-	f.listener.StateEntered(f.curState)
-}
-
-func (f *SimpleFSM) Current() *State {
-	f.lock.Lock()
-	defer f.lock.Unlock()
-
-	return &f.curState
-}
-
-func (f *SimpleFSM) Start() error {
-	f.listener.FSMStarted(f)
-	return nil
-}
-
-func (f *SimpleFSM) Close() error {
-	f.listener.FSMStopped(f)
-	return nil
-}
-
-func (f *SimpleFSM) AddState(state State, event Event, action Action) error {
-	f.lock.Lock()
-	defer f.lock.Unlock()
-
-	if evs, ok := f.stateMap[state]; ok {
-		evs[event] = action
-	} else {
-		f.stateMap[state] = map[interface{}]Action{
-			event: action,
-		}
-	}
-	return nil
-}
-
-func (f *SimpleFSM) Execute(event Event, param interface{}) error {
-	f.lock.Lock()
-	defer f.lock.Unlock()
-
-	if evs, ok := f.stateMap[f.curState]; ok {
-		if action, ok := evs[event]; ok {
-			//为了减小锁粒度，在执行action时解锁，由于DefaultFSM用chan处理event保证了互斥
-			nextState, err := func() (State, error) {
-				f.lock.Unlock()
-				defer f.lock.Lock()
-
-				f.listener.TransitionStarted(action)
-				next, err := action(param)
-				f.listener.TransitionEnded(action)
-				if err != nil {
-					f.listener.FSMError(f, err)
-				}
-				return next, err
-			}()
-
-			f.listener.StateEntered(nextState)
-			origin := f.curState
-			f.curState = nextState
-			f.listener.StateExited(origin)
-			f.listener.StateChanged(origin, nextState)
-			return err
-		} else {
-			f.listener.EventNotAccepted(event)
-			//log.Printf("no action found, state: %v event: %v\n", f.curState, event)
-			return nil
-		}
-	}
-	f.listener.EventNotAccepted(event)
-	return nil
-}
-
-func (f *SimpleFSM) SendEvent(event Event, param interface{}) error {
-	return f.Execute(event, param)
-}
 
 type eventEntity struct {
 	event Event
@@ -149,7 +24,9 @@ type DefaultFSM struct {
 	SimpleFSM
 
 	eventChanSize int
+	msgChanSize   int
 	eventChan     chan eventEntity
+	msgChan       chan Message
 	stopChan      chan bool
 }
 
@@ -157,23 +34,36 @@ type Opt func(f *DefaultFSM)
 
 func New(opts ...Opt) *DefaultFSM {
 	ret := &DefaultFSM{
-		SimpleFSM: *NewSimpleFSM(),
-		stopChan:  make(chan bool),
+		SimpleFSM:   *NewSimpleFSM(),
+		stopChan:    make(chan bool),
+		msgChanSize: DefaultMessageBufferSize,
 	}
 	for i := range opts {
 		opts[i](ret)
 	}
 	if ret.eventChanSize <= 0 {
-		ret.eventChanSize = 1024
+		ret.eventChanSize = DefaultEventBufferSize
 	}
-	ret.eventChan = make(chan eventEntity, 1024)
+	ret.eventChan = make(chan eventEntity, ret.eventChanSize)
+	if ret.msgChanSize > 0 {
+		ret.msgChan = make(chan Message, ret.msgChanSize)
+	}
+	ret.sender = ret
 
 	return ret
 }
 
+//配置状态机事件缓存大小，默认为1024
 func SetEventBufferSize(size int) Opt {
 	return func(f *DefaultFSM) {
 		f.eventChanSize = size
+	}
+}
+
+//配置状态机内部消息缓存大小，默认为1024。如果<=0则使用同步发送消息的方式
+func SetMessageBufferSize(size int) Opt {
+	return func(f *DefaultFSM) {
+		f.msgChanSize = size
 	}
 }
 
@@ -189,14 +79,37 @@ func (f *DefaultFSM) Start() error {
 			}
 		}
 	}()
-	f.listener.FSMStarted(f)
+	if f.msgChanSize > 0 {
+		go func() {
+			for {
+				select {
+				case msg := <-f.msgChan:
+					f.handleMsg(msg)
+					break
+				case <-f.stopChan:
+					return
+				}
+			}
+		}()
+	}
+	f.sender.SendMessage(&fsmStartedMsg{
+		l:   f,
+		fsm: f,
+	})
 	return nil
 }
 
 func (f *DefaultFSM) Close() error {
 	close(f.stopChan)
-	f.listener.FSMStopped(f)
+	f.sender.SendMessage(&fsmStoppedMsg{
+		l:   f,
+		fsm: f,
+	})
 	return nil
+}
+
+func (f *DefaultFSM) SendMessage(m Message) {
+	f.msgChan <- m
 }
 
 func (f *DefaultFSM) SendEvent(event Event, param interface{}) error {

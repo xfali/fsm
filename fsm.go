@@ -20,8 +20,6 @@ type Listener interface {
 
 	EventNotAccepted(event Event)
 
-	Transition(action Action)
-
 	TransitionStarted(action Action)
 
 	TransitionEnded(action Action)
@@ -40,7 +38,7 @@ type FSM interface {
 
 	Close() error
 
-	SetListener(listener Listener)
+	AddListener(listener Listener)
 
 	Initial(state State)
 

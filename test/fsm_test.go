@@ -83,6 +83,7 @@ func NewFSM(t *testing.T) fsm.FSM {
 func TestDefaultFsm(t *testing.T) {
 	m := NewFSM(t)
 
+	m.AddListener(&fsm.DefaultListener{})
 	m.Start()
 	defer m.Close()
 
