@@ -11,6 +11,8 @@ type State = interface{}
 type Event = interface{}
 type Action func(interface{}) (State, error)
 
+//TODO: Interceptor
+
 type Listener interface {
 	StateChanged(from, to State)
 

@@ -115,38 +115,54 @@ func (f *SimpleFSM) Execute(event Event, param interface{}) error {
 						err: err,
 					})
 				}
+				f.sender.SendMessage(&stateEnteredMsg{
+					l:     f,
+					state: next,
+				})
 				return next, err
 			}()
 
-			f.sender.SendMessage(&stateEnteredMsg{
-				l:     f,
-				state: nextState,
-			})
 			origin := f.curState
 			f.curState = nextState
-			f.sender.SendMessage(&stateExitedMsg{
-				l:     f,
-				state: origin,
-			})
-			f.sender.SendMessage(&stateChangedMsg{
-				l:    f,
-				from: origin,
-				to:   nextState,
-			})
+
+			func(origin, next State) {
+				f.lock.Unlock()
+				defer f.lock.Lock()
+				f.sender.SendMessage(&stateExitedMsg{
+					l:     f,
+					state: origin,
+				})
+				f.sender.SendMessage(&stateChangedMsg{
+					l:    f,
+					from: origin,
+					to:   next,
+				})
+			}(origin, nextState)
+
 			return err
 		} else {
+			func() {
+				f.lock.Unlock()
+				defer f.lock.Lock()
+				f.sender.SendMessage(&eventNotAcceptedMsg{
+					l:     f,
+					event: event,
+				})
+			}()
+
+			//log.Printf("no action found, state: %v event: %v\n", f.curState, event)
+			return nil
+		}
+	} else {
+		func() {
+			f.lock.Unlock()
+			defer f.lock.Lock()
 			f.sender.SendMessage(&eventNotAcceptedMsg{
 				l:     f,
 				event: event,
 			})
-			//log.Printf("no action found, state: %v event: %v\n", f.curState, event)
-			return nil
-		}
+		}()
 	}
-	f.sender.SendMessage(&eventNotAcceptedMsg{
-		l:     f,
-		event: event,
-	})
 	return nil
 }
 

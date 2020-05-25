@@ -12,7 +12,7 @@ import (
 
 const (
 	DefaultEventBufferSize   = 1024
-	DefaultMessageBufferSize = 1024
+	DefaultMessageBufferSize = 10 * DefaultEventBufferSize
 )
 
 type eventEntity struct {
@@ -60,7 +60,7 @@ func SetEventBufferSize(size int) Opt {
 	}
 }
 
-//配置状态机内部消息缓存大小，默认为1024。如果<=0则使用同步发送消息的方式
+//配置状态机内部消息缓存大小，默认为10 * DefaultEventBufferSize，推荐也为DefaultEventBufferSize的十倍以上。如果<=0则使用同步发送消息的方式
 func SetMessageBufferSize(size int) Opt {
 	return func(f *DefaultFSM) {
 		f.msgChanSize = size
