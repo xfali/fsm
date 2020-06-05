@@ -7,6 +7,9 @@ package test
 
 import (
 	"github.com/xfali/fsm"
+	"math/rand"
+	"strconv"
+	"sync"
 	"testing"
 	"time"
 )
@@ -27,6 +30,7 @@ const (
 
 func NewFSM(t *testing.T) fsm.FSM {
 	m := fsm.New()
+	m.AddListener(&fsm.DefaultListener{})
 	//m := fsm.New(fsm.SetMessageBufferSize(0))
 	m.AddState(state_a, event_b, func(i interface{}) (state fsm.State, e error) {
 		t.Log("a -> 2")
@@ -98,7 +102,7 @@ func TestDefaultFsm(t *testing.T) {
 	m.SendEvent(event_c, nil)
 	m.SendEvent(event_d, nil)
 
-	<- time.NewTimer(10*time.Second).C
+	<-time.NewTimer(10 * time.Second).C
 }
 
 func TestDefaultFsmPresister(t *testing.T) {
@@ -127,4 +131,30 @@ func TestDefaultFsmPresister(t *testing.T) {
 	if *m.Current() != state_d {
 		t.Fatal("m. not state_d")
 	}
+}
+
+func TestDefaultFsmAsync(t *testing.T) {
+	m := NewFSM(t)
+
+	m.Start()
+	defer m.Close()
+
+	random := rand.New(rand.NewSource(time.Now().Unix()))
+	wait := sync.WaitGroup{}
+	wait.Add(100)
+	for i := 0; i < 100; i++ {
+		go func() {
+			defer wait.Done()
+
+			for j:=0; j<100; j++ {
+				event := strconv.Itoa(random.Intn(5))
+				m.SendEvent(event, nil)
+			}
+		}()
+	}
+
+	wait.Wait()
+
+	time.Sleep(time.Second)
+
 }
